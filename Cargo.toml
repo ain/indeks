@@ -18,8 +18,19 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 
+# `build.rs` generates an RSA key, which is unusably slow unoptimised.
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release.build-override]
+opt-level = 3
+
 [dev-dependencies]
 assert_cmd = "2.2.2"
 base64 = "0.23.0"
 httpmock = "0.8.2"
 predicates = "3.1.4"
+
+[build-dependencies]
+rand = "0.8"
+rsa = "0.9"

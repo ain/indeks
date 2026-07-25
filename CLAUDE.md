@@ -77,8 +77,14 @@ is no concurrency worth having.
 Nothing reaches the public internet. Tests either use `--dry-run`, fail during
 validation, or point `INDEKS_GOOGLE_ENDPOINT` / `INDEKS_INDEXNOW_ENDPOINT` at a mock.
 
-`tests/fixtures/credentials.json` holds a **real 2048-bit RSA key**, generated solely
-for tests so that JWT signing is genuinely exercised. It belongs to no account anywhere.
+Tests sign with a **real RSA key**, so JWT signing is genuinely exercised rather than
+mocked — but the key is never committed. `build.rs` generates one into `OUT_DIR` along
+with a service-account file around it; tests reach it through
+`crate::GENERATED_SERVICE_ACCOUNT` (unit tests) or `concat!(env!("OUT_DIR"), …)`
+(integration tests). It is written once per `OUT_DIR` and reused.
+
+That is why `Cargo.toml` sets `opt-level = 3` for build scripts in **both** profiles:
+`rsa` key generation takes close to a minute unoptimised, and under a second optimised.
 
 ## Commands
 

@@ -138,7 +138,7 @@ impl ServiceAccount {
 mod tests {
     use super::*;
 
-    const VALID_FILE: &str = "tests/fixtures/credentials.json";
+    const VALID_FILE: &str = crate::GENERATED_SERVICE_ACCOUNT;
     const MALFORMED_FILE: &str = "tests/fixtures/malformed.json";
 
     #[test]

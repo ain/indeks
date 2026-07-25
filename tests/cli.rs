@@ -11,7 +11,7 @@ use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 const KEY: &str = "abcdef0123456789abcdef0123456789";
-const CREDENTIALS_FILE: &str = "tests/fixtures/credentials.json";
+const CREDENTIALS_FILE: &str = concat!(env!("OUT_DIR"), "/service-account.json");
 const SITEMAP_FILE: &str = "tests/fixtures/sitemap.xml";
 
 fn indeks() -> Command {

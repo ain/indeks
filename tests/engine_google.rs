@@ -14,7 +14,7 @@ use indeks::engine::Submitter;
 use indeks::engine::google::Google;
 use url::Url;
 
-const FIXTURE: &str = "tests/fixtures/credentials.json";
+const FIXTURE: &str = concat!(env!("OUT_DIR"), "/service-account.json");
 const ACCESS_TOKEN: &str = "ya29.test-access-token";
 
 /// Copy the service-account fixture with its token endpoint pointed elsewhere.

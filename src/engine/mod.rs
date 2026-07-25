@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn google_accepts_a_service_account_file() {
-        let credential = Credential::File(PathBuf::from("tests/fixtures/credentials.json"));
+        let credential = Credential::File(PathBuf::from(crate::GENERATED_SERVICE_ACCOUNT));
         assert!(Kind::Google.check_credential(&credential).is_ok());
     }
 

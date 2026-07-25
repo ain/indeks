@@ -248,7 +248,7 @@ mod tests {
     use base64::Engine as _;
     use std::path::PathBuf;
 
-    const FIXTURE: &str = "tests/fixtures/credentials.json";
+    const FIXTURE: &str = crate::GENERATED_SERVICE_ACCOUNT;
 
     fn account() -> ServiceAccount {
         ServiceAccount::load(&PathBuf::from(FIXTURE)).unwrap()

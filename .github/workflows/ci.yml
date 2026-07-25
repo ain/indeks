@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test, clippy and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc --version
+
+      # `build.rs` generates an RSA key, and the build-script profile is
+      # optimised for it, so a cold cache costs a few minutes of compiling.
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Nothing here reaches the internet: tests use --dry-run, fail during
+      # validation, or point the endpoint overrides at a local mock server.
+      - name: Test
+        run: cargo test
+
+  msrv:
+    name: Build on the oldest supported Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cargo.toml claims `rust-version = "1.88"`, and README repeats it. This
+      # job is what makes that claim true rather than aspirational.
+      - name: Install Rust 1.88
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup default 1.88
+          rustc --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-msrv-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-msrv-cargo-
+
+      # Checking rather than testing: the claim is about the crate compiling on
+      # the version it promises. Behaviour is covered by the job above, and
+      # running the suite twice buys nothing. `--all-targets` includes the test
+      # targets, so dev-dependencies are held to the same bar.
+      - name: Check
+        run: cargo check --all-targets --locked

@@ -1,5 +1,7 @@
 # indeks
 
+[![CI](https://github.com/ain/indeks/actions/workflows/ci.yml/badge.svg)](https://github.com/ain/indeks/actions/workflows/ci.yml)
+
 CLI to push URLs and sitemaps to search engines for indexing.
 
 ## Status
@@ -243,6 +245,9 @@ cargo test
 cargo clippy --all-targets
 cargo fmt
 ```
+
+CI runs those three on every push and pull request, plus a `cargo check` on Rust 1.88
+to keep the minimum-version claim honest. Nothing in the suite reaches the internet.
 
 The requirements are in `spec/initial-functionality.md` and the plan being worked
 through, including the milestone numbering referenced by the `todo!`s in the source, is

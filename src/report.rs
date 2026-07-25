@@ -73,12 +73,12 @@ pub fn dry_run(engine: &str, validated: &Validated, previews: &[Preview]) {
     if !previews.is_empty() {
         println!("\nSitemaps ({}):", previews.len());
         for preview in previews {
-            match (&preview.source, &preview.urls) {
+            match (&preview.source, &preview.entries) {
                 (Source::Remote(url), _) => println!("  {url} — would be fetched and expanded"),
-                (Source::Local(path), Some(urls)) => {
-                    println!("  {} — local file, {} URLs", path.display(), urls.len());
-                    for url in urls {
-                        println!("    {url}");
+                (Source::Local(path), Some(entries)) => {
+                    println!("  {} — local file, {} URLs", path.display(), entries.len());
+                    for entry in entries {
+                        println!("    {}", entry.url);
                     }
                 }
                 (Source::Local(path), None) => println!("  {} — local file", path.display()),

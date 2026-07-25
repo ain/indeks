@@ -107,26 +107,96 @@ pub enum SitemapError {
 #[derive(Debug)]
 pub struct Preview {
     pub source: Source,
-    /// The URLs of a local sitemap. `None` for a remote one, which a dry run
+    /// The entries of a local sitemap. `None` for a remote one, which a dry run
     /// does not fetch.
-    pub urls: Option<Vec<Url>>,
+    pub entries: Option<Vec<Entry>>,
 }
 
-/// Extract every `urlset > url > loc` from a sitemap document.
+/// One `<url>` from a sitemap, with the fields prioritisation can order by.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entry {
+    pub url: Url,
+    /// `<priority>`, 0.0 to 1.0. `None` when absent or unusable; sitemaps.org
+    /// defines 0.5 as the default, but that belongs to whoever orders entries.
+    pub priority: Option<f32>,
+    pub changefreq: Option<ChangeFreq>,
+}
+
+/// `<changefreq>`, ordered least to most frequent so that deriving `Ord` gives
+/// the ranking prioritisation needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChangeFreq {
+    Never,
+    Yearly,
+    Monthly,
+    Weekly,
+    Daily,
+    Hourly,
+    Always,
+}
+
+impl ChangeFreq {
+    /// Parse one of the seven values sitemaps.org defines. Anything else is
+    /// `None`: an unrecognised frequency is no more usable than an absent one.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "always" => Some(ChangeFreq::Always),
+            "hourly" => Some(ChangeFreq::Hourly),
+            "daily" => Some(ChangeFreq::Daily),
+            "weekly" => Some(ChangeFreq::Weekly),
+            "monthly" => Some(ChangeFreq::Monthly),
+            "yearly" => Some(ChangeFreq::Yearly),
+            "never" => Some(ChangeFreq::Never),
+            _ => None,
+        }
+    }
+}
+
+/// The `<url>` children this parser reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Loc,
+    Priority,
+    ChangeFreq,
+}
+
+impl Field {
+    fn of(name: &str) -> Option<Self> {
+        match name {
+            "loc" => Some(Field::Loc),
+            "priority" => Some(Field::Priority),
+            "changefreq" => Some(Field::ChangeFreq),
+            _ => None,
+        }
+    }
+}
+
+/// A `<url>` element being read.
+#[derive(Debug, Default)]
+struct Pending {
+    loc: Option<String>,
+    priority: Option<f32>,
+    changefreq: Option<ChangeFreq>,
+}
+
+/// Extract every `urlset > url` from a sitemap document, with its `<loc>` and
+/// the fields that can order it.
 ///
-/// Requires at least one `loc`, and every `loc` to be an absolute http(s) URL.
+/// Requires at least one usable entry, and every `loc` to be an absolute http(s)
+/// URL. A `<url>` carrying no `<loc>` contributes nothing.
 ///
 /// Elements are matched on local name, so a namespace prefix is accepted and a
 /// missing or unexpected `xmlns` does not cause a valid sitemap to be rejected.
-/// Only the exact `urlset > url > loc` nesting counts, which keeps the `<loc>`
-/// of an image or video extension — nested a level deeper — out of the results.
-pub fn parse(source_name: &str, xml: &str) -> Result<Vec<Url>, SitemapError> {
+/// Only the exact `urlset > url > *` nesting counts, which keeps the `<loc>` of
+/// an image or video extension — nested a level deeper — out of the results.
+pub fn parse(source_name: &str, xml: &str) -> Result<Vec<Entry>, SitemapError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut path: Vec<String> = Vec::new();
-    let mut urls = Vec::new();
-    let mut loc: Option<String> = None;
+    let mut entries = Vec::new();
+    let mut pending: Option<Pending> = None;
+    let mut text: Option<String> = None;
     let mut root_seen = false;
 
     loop {
@@ -144,8 +214,11 @@ pub fn parse(source_name: &str, xml: &str) -> Result<Vec<Url>, SitemapError> {
                     check_root(source_name, &name)?;
                 }
                 path.push(name);
-                if is_loc(&path) {
-                    loc = Some(String::new());
+
+                if is_url(&path) {
+                    pending = Some(Pending::default());
+                } else if field(&path).is_some() {
+                    text = Some(String::new());
                 }
             }
 
@@ -155,59 +228,122 @@ pub fn parse(source_name: &str, xml: &str) -> Result<Vec<Url>, SitemapError> {
                     root_seen = true;
                     check_root(source_name, &name)?;
                 }
-                // A self-closing element has no text, so an empty <loc/> is
-                // reported the same way a blank one is.
                 path.push(name);
-                if is_loc(&path) {
-                    urls.push(parse_loc(source_name, "")?);
+
+                // A self-closing element holds no text, so an empty <loc/> is
+                // rejected the same way a blank one is.
+                if field(&path) == Some(Field::Loc)
+                    && let Some(pending) = pending.as_mut()
+                {
+                    pending.loc = Some(String::new());
                 }
                 path.pop();
             }
 
             Event::End(_) => {
-                if let Some(value) = loc.take() {
-                    urls.push(parse_loc(source_name, &value)?);
+                if let (Some(field), Some(value)) = (field(&path), text.take())
+                    && let Some(pending) = pending.as_mut()
+                {
+                    store(source_name, pending, field, &value);
                 }
+
+                if is_url(&path)
+                    && let Some(pending) = pending.take()
+                    && let Some(entry) = finish(source_name, pending)?
+                {
+                    entries.push(entry);
+                }
+
                 path.pop();
             }
 
-            Event::Text(text) if loc.is_some() => {
-                let raw = text
+            Event::Text(chunk) if text.is_some() => {
+                let raw = chunk
                     .decode()
                     .map_err(|error| malformed(source_name, error.to_string()))?;
-                loc.get_or_insert_default().push_str(&raw);
+                text.get_or_insert_default().push_str(&raw);
             }
 
             // CDATA is literal, so it is decoded as-is.
-            Event::CData(cdata) if loc.is_some() => {
+            Event::CData(cdata) if text.is_some() => {
                 let raw = cdata
                     .decode()
                     .map_err(|error| malformed(source_name, error.to_string()))?;
-                loc.get_or_insert_default().push_str(&raw);
+                text.get_or_insert_default().push_str(&raw);
             }
 
             // Entity references are separate events rather than part of the
             // surrounding text, so `&amp;` in a <loc> is resolved here.
-            Event::GeneralRef(reference) if loc.is_some() => {
+            Event::GeneralRef(reference) if text.is_some() => {
                 let resolved = resolve_reference(source_name, &reference)?;
-                loc.get_or_insert_default().push_str(&resolved);
+                text.get_or_insert_default().push_str(&resolved);
             }
 
             _ => {}
         }
     }
 
-    if urls.is_empty() {
+    if entries.is_empty() {
         return Err(SitemapError::Empty {
             source_name: source_name.to_string(),
         });
     }
 
-    Ok(urls)
+    Ok(entries)
+}
+
+/// Record one field of the `<url>` being read.
+///
+/// A `priority` or `changefreq` that cannot be used is warned about and left
+/// unset rather than failing the parse: it would otherwise reject sitemaps that
+/// work today, for runs that never asked for prioritisation.
+fn store(source_name: &str, pending: &mut Pending, field: Field, value: &str) {
+    match field {
+        Field::Loc => pending.loc = Some(value.to_string()),
+
+        Field::Priority => match value.trim().parse::<f32>() {
+            Ok(priority) if (0.0..=1.0).contains(&priority) => pending.priority = Some(priority),
+            Ok(priority) => {
+                let clamped = priority.clamp(0.0, 1.0);
+                tracing::warn!(
+                    "{source_name}: <priority> {priority} is out of range, using {clamped}"
+                );
+                pending.priority = Some(clamped);
+            }
+            Err(_) => {
+                tracing::warn!("{source_name}: <priority> {value:?} is not a number, ignoring it");
+            }
+        },
+
+        Field::ChangeFreq => match ChangeFreq::parse(value) {
+            Some(changefreq) => pending.changefreq = Some(changefreq),
+            None => {
+                tracing::warn!(
+                    "{source_name}: <changefreq> {value:?} is not a known value, ignoring it"
+                );
+            }
+        },
+    }
+}
+
+/// Turn a finished `<url>` into an entry, or nothing when it carried no `<loc>`.
+fn finish(source_name: &str, pending: Pending) -> Result<Option<Entry>, SitemapError> {
+    let Some(loc) = pending.loc else {
+        return Ok(None);
+    };
+
+    Ok(Some(Entry {
+        url: parse_loc(source_name, &loc)?,
+        priority: pending.priority,
+        changefreq: pending.changefreq,
+    }))
 }
 
 /// Read a local sitemap, or fetch a remote one, then parse it.
-pub fn load(source: &Source, client: &reqwest::blocking::Client) -> Result<Vec<Url>, SitemapError> {
+pub fn load(
+    source: &Source,
+    client: &reqwest::blocking::Client,
+) -> Result<Vec<Entry>, SitemapError> {
     let name = source.to_string();
     let xml = match source {
         Source::Local(path) => read_local(&name, path)?,
@@ -222,7 +358,7 @@ pub fn preview(sources: &[Source]) -> Result<Vec<Preview>, SitemapError> {
     sources
         .iter()
         .map(|source| {
-            let urls = match source {
+            let entries = match source {
                 Source::Local(path) => {
                     let name = source.to_string();
                     Some(parse(&name, &read_local(&name, path)?)?)
@@ -231,7 +367,7 @@ pub fn preview(sources: &[Source]) -> Result<Vec<Preview>, SitemapError> {
             };
             Ok(Preview {
                 source: source.clone(),
-                urls,
+                entries,
             })
         })
         .collect()
@@ -325,8 +461,21 @@ fn check_root(source_name: &str, name: &str) -> Result<(), SitemapError> {
     }
 }
 
-fn is_loc(path: &[String]) -> bool {
-    path.len() == 3 && path[0] == "urlset" && path[1] == "url" && path[2] == "loc"
+/// Whether the path is exactly `urlset > url`.
+fn is_url(path: &[String]) -> bool {
+    path.len() == 2 && path[0] == "urlset" && path[1] == "url"
+}
+
+/// Which `<url>` child the path names, if it is one this parser reads.
+///
+/// The depth check is what keeps an image or video extension's `<loc>`, nested
+/// one level further in, out of the results.
+fn field(path: &[String]) -> Option<Field> {
+    if path.len() == 3 && path[0] == "urlset" && path[1] == "url" {
+        Field::of(&path[2])
+    } else {
+        None
+    }
 }
 
 fn parse_loc(source_name: &str, value: &str) -> Result<Url, SitemapError> {
@@ -359,8 +508,19 @@ mod tests {
         parse("test", xml)
             .unwrap()
             .iter()
-            .map(Url::to_string)
+            .map(|entry| entry.url.to_string())
             .collect()
+    }
+
+    fn only(xml: &str) -> Entry {
+        let mut entries = parse("test", xml).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        entries.remove(0)
+    }
+
+    /// A sitemap of one `<url>` carrying the given children.
+    fn one_url(children: &str) -> String {
+        format!("<urlset><url><loc>https://example.com/a</loc>{children}</url></urlset>")
     }
 
     #[test]
@@ -601,8 +761,121 @@ mod tests {
         ];
         let previews = preview(&sources).unwrap();
 
-        assert_eq!(previews[0].urls.as_ref().unwrap().len(), 3);
-        assert!(previews[1].urls.is_none());
+        assert_eq!(previews[0].entries.as_ref().unwrap().len(), 3);
+        assert!(previews[1].entries.is_none());
+    }
+
+    #[test]
+    fn reads_priority_and_changefreq() {
+        let entry = only(&one_url(
+            "<priority>0.8</priority><changefreq>daily</changefreq>",
+        ));
+        assert_eq!(entry.priority, Some(0.8));
+        assert_eq!(entry.changefreq, Some(ChangeFreq::Daily));
+    }
+
+    #[test]
+    fn a_url_without_them_carries_neither() {
+        let entry = only(&one_url(""));
+        assert_eq!(entry.priority, None);
+        assert_eq!(entry.changefreq, None);
+    }
+
+    #[test]
+    fn accepts_priority_at_both_ends_of_the_range() {
+        assert_eq!(
+            only(&one_url("<priority>0.0</priority>")).priority,
+            Some(0.0)
+        );
+        assert_eq!(
+            only(&one_url("<priority>1.0</priority>")).priority,
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn clamps_a_priority_outside_the_range() {
+        assert_eq!(only(&one_url("<priority>7</priority>")).priority, Some(1.0));
+        assert_eq!(
+            only(&one_url("<priority>-2</priority>")).priority,
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn ignores_a_priority_that_is_not_a_number() {
+        // Warned about, not fatal: failing here would reject sitemaps that work
+        // today, for runs that never asked to prioritise.
+        assert_eq!(only(&one_url("<priority>high</priority>")).priority, None);
+    }
+
+    #[test]
+    fn ignores_an_unknown_changefreq() {
+        assert_eq!(
+            only(&one_url("<changefreq>fortnightly</changefreq>")).changefreq,
+            None
+        );
+    }
+
+    #[test]
+    fn reads_changefreq_whatever_its_case() {
+        assert_eq!(
+            only(&one_url("<changefreq>  Weekly </changefreq>")).changefreq,
+            Some(ChangeFreq::Weekly)
+        );
+    }
+
+    #[test]
+    fn changefreq_ranks_least_to_most_frequent() {
+        let mut all = vec![
+            ChangeFreq::Daily,
+            ChangeFreq::Never,
+            ChangeFreq::Always,
+            ChangeFreq::Monthly,
+        ];
+        all.sort();
+        assert_eq!(
+            all,
+            [
+                ChangeFreq::Never,
+                ChangeFreq::Monthly,
+                ChangeFreq::Daily,
+                ChangeFreq::Always
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_each_urls_fields_to_itself() {
+        let xml = "<urlset>\
+                   <url><loc>https://example.com/a</loc><priority>0.9</priority></url>\
+                   <url><loc>https://example.com/b</loc></url>\
+                   <url><loc>https://example.com/c</loc><changefreq>hourly</changefreq></url>\
+                   </urlset>";
+        let entries = parse("test", xml).unwrap();
+
+        assert_eq!(entries[0].priority, Some(0.9));
+        assert_eq!(entries[1].priority, None);
+        assert_eq!(entries[1].changefreq, None);
+        assert_eq!(entries[2].changefreq, Some(ChangeFreq::Hourly));
+    }
+
+    #[test]
+    fn ignores_the_priority_of_an_extension_element() {
+        // An image extension nests its own fields a level deeper.
+        let xml = "<urlset><url><loc>https://example.com/a</loc>\
+                   <image:image><priority>0.1</priority></image:image>\
+                   </url></urlset>";
+        assert_eq!(parse("test", xml).unwrap()[0].priority, None);
+    }
+
+    #[test]
+    fn a_url_without_a_loc_contributes_nothing() {
+        let xml = "<urlset>\
+                   <url><changefreq>daily</changefreq></url>\
+                   <url><loc>https://example.com/a</loc></url>\
+                   </urlset>";
+        assert_eq!(locs(xml), ["https://example.com/a"]);
     }
 
     #[test]

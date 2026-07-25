@@ -24,7 +24,7 @@ fn fetches_and_parses_a_remote_sitemap() {
             .body(VALID);
     });
 
-    let urls = sitemap::load(
+    let entries = sitemap::load(
         &remote(&server, "/sitemap.xml"),
         &reqwest::blocking::Client::new(),
     )
@@ -32,7 +32,10 @@ fn fetches_and_parses_a_remote_sitemap() {
 
     mock.assert();
     assert_eq!(
-        urls.iter().map(Url::to_string).collect::<Vec<_>>(),
+        entries
+            .iter()
+            .map(|entry| entry.url.to_string())
+            .collect::<Vec<_>>(),
         ["https://example.com/", "https://example.com/about"]
     );
 }

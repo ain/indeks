@@ -15,7 +15,9 @@ use crate::validate::Validated;
 pub fn collect(validated: &Validated, client: &Client) -> Result<Vec<Url>, SitemapError> {
     let mut urls = validated.urls.clone();
     for source in &validated.sitemaps {
-        urls.extend(sitemap::load(source, client)?);
+        // Milestone 3 of the prioritisation plan orders these; for now an
+        // entry contributes only its URL, in document order.
+        urls.extend(sitemap::load(source, client)?.into_iter().map(|e| e.url));
     }
     Ok(dedupe(urls))
 }

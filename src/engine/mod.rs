@@ -74,6 +74,18 @@ impl Outcome {
     }
 }
 
+pub trait Submitter {
+    /// Name used in output, e.g. `Google Indexing API`.
+    fn name(&self) -> &'static str;
+
+    /// Submit every URL, returning one outcome per URL.
+    ///
+    /// Returns `Err` only when the exchange itself failed — a transport error,
+    /// or credentials that could not be turned into a token. URLs rejected by
+    /// the API come back as failed outcomes.
+    fn submit(&self, urls: &[Url]) -> Result<Vec<Outcome>>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,16 +123,4 @@ mod tests {
         assert_eq!(Kind::Bing.name(), indexnow::NAME);
         assert_eq!(Kind::Google.name(), google::NAME);
     }
-}
-
-pub trait Submitter {
-    /// Name used in output, e.g. `Google Indexing API`.
-    fn name(&self) -> &'static str;
-
-    /// Submit every URL, returning one outcome per URL.
-    ///
-    /// Returns `Err` only when the exchange itself failed — a transport error,
-    /// or credentials that could not be turned into a token. URLs rejected by
-    /// the API come back as failed outcomes.
-    fn submit(&self, urls: &[Url]) -> Result<Vec<Outcome>>;
 }

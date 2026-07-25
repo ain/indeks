@@ -267,6 +267,21 @@ mod tests {
     }
 
     #[test]
+    fn renders_errors_without_a_leading_blank_line() {
+        let errors = validate_bing(&args(&["/a", "/b"], &[], Some(KEY))).unwrap_err();
+        let rendered = errors.to_string();
+
+        assert_eq!(
+            rendered,
+            format!(
+                "error: --url /a: not an absolute URL\n\
+                 error: --url /b: not an absolute URL\n\n{DRY_RUN_HINT}"
+            ),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn renders_one_error_per_line() {
         let errors = validate_bing(&args(&["/a", "/b"], &[], Some(KEY))).unwrap_err();
         let rendered = errors.to_string();

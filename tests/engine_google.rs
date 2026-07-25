@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use base64::Engine as _;
 use httpmock::MockServer;
 use indeks::credentials::Credential;
 use indeks::engine::Submitter;
@@ -102,6 +103,53 @@ fn sends_the_notification_google_expects() {
         .unwrap();
 
     publish.assert();
+}
+
+/// Google refuses an assertion whose `iat` is not close to now ("Invalid JWT:
+/// Token must be a short-lived token"), so the timestamps must be wall-clock.
+#[test]
+fn the_assertion_is_stamped_with_the_current_time() {
+    let server = MockServer::start();
+    let token = server.mock(|when, then| {
+        when.method("POST").path("/token").is_true(|request| {
+            let body = String::from_utf8_lossy(request.body_ref()).to_string();
+            let assertion = body
+                .split('&')
+                .find_map(|pair| pair.strip_prefix("assertion="))
+                .expect("no assertion in the token request");
+
+            let claims = assertion.split('.').nth(1).expect("no JWT payload");
+            let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(claims)
+                .expect("payload is not base64url");
+            let claims: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+
+            let issued_at = claims["iat"].as_u64().unwrap();
+            let expires = claims["exp"].as_u64().unwrap();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+
+            issued_at.abs_diff(now) < 60 && expires > now
+        });
+        then.status(200).json_body(serde_json::json!({
+            "access_token": ACCESS_TOKEN,
+            "expires_in": 3599,
+            "token_type": "Bearer",
+        }));
+    });
+    server.mock(|when, then| {
+        when.method("POST").path("/publish");
+        then.status(200);
+    });
+
+    let credential = Credential::File(service_account(&server.url("/token")));
+    engine(&server, credential)
+        .submit(&urls(&["https://example.com/a"]))
+        .unwrap();
+
+    token.assert();
 }
 
 #[test]

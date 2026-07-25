@@ -348,6 +348,19 @@ mod tests {
     }
 
     #[test]
+    fn explains_a_rate_limit() {
+        let error = failure(StatusCode::TOO_MANY_REQUESTS, "", "example.com", KEY).unwrap();
+        assert_eq!(error, "too many requests; try again later");
+    }
+
+    #[test]
+    fn names_itself_for_output() {
+        let engine = IndexNow::new(KEY.to_string(), reqwest::blocking::Client::new());
+        assert_eq!(engine.name(), NAME);
+        assert_eq!(engine.name(), "Bing IndexNow");
+    }
+
+    #[test]
     fn keeps_the_response_body_alongside_the_explanation() {
         let error = failure(
             StatusCode::BAD_REQUEST,

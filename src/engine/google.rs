@@ -305,6 +305,16 @@ mod tests {
     }
 
     #[test]
+    fn names_itself_for_output() {
+        let engine = Google::new(
+            Credential::Token("ya29.test".to_string()),
+            reqwest::blocking::Client::new(),
+        );
+        assert_eq!(engine.name(), NAME);
+        assert_eq!(engine.name(), "Google Indexing API");
+    }
+
+    #[test]
     fn accepts_a_published_notification() {
         assert!(failure(StatusCode::OK, "{}").is_none());
     }

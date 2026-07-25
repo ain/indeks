@@ -197,7 +197,7 @@ fn a_failing_verbose_run_does_not_advise_verbose_again() {
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method("POST").path("/indexnow");
-        then.status(429);
+        then.status(429).body("slow down, too many requests");
     });
 
     indeks()
@@ -213,9 +213,11 @@ fn a_failing_verbose_run_does_not_advise_verbose_again() {
         .assert()
         .code(1)
         .stderr(contains("Please consider using `--verbose`").not())
-        // Both halves of the exchange should be logged.
+        // Both halves of the exchange should be logged, bodies included.
         .stderr(contains("> POST"))
-        .stderr(contains("< HTTP"));
+        .stderr(contains(r#"> {"host":"example.com""#))
+        .stderr(contains("< HTTP"))
+        .stderr(contains("< slow down, too many requests"));
 }
 
 #[test]

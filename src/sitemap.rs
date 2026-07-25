@@ -439,6 +439,13 @@ mod tests {
     }
 
     #[test]
+    fn ignores_entity_references_outside_a_loc() {
+        let xml = "<urlset><url><news>Bild &amp; Ton</news>\
+                   <loc>https://example.com/a</loc></url></urlset>";
+        assert_eq!(locs(xml), ["https://example.com/a"]);
+    }
+
+    #[test]
     fn parses_a_plain_sitemap() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

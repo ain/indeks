@@ -6,12 +6,13 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use base64::Engine as _;
 use httpmock::MockServer;
 use indeks::credentials::Credential;
 use indeks::engine::Submitter;
-use indeks::engine::google::Google;
+use indeks::engine::google::{Backoff, Google};
 use url::Url;
 
 const FIXTURE: &str = concat!(env!("OUT_DIR"), "/service-account.json");
@@ -55,7 +56,27 @@ fn engine(server: &MockServer, credential: Credential) -> Google {
         credential,
         client: reqwest::blocking::Client::new(),
         endpoint: server.url("/publish"),
+        // Retry immediately: these tests are about how many attempts happen,
+        // not how long they wait.
+        backoff: Backoff {
+            attempts: 2,
+            first_wait: Duration::ZERO,
+        },
     }
+}
+
+/// A 429 body naming the quota the way Google does.
+fn quota_body(metric: &str) -> serde_json::Value {
+    serde_json::json!({
+        "error": {
+            "code": 429,
+            "message": format!(
+                "Quota exceeded for quota metric 'Publish requests' and limit '{metric}' \
+                 of service 'indexing.googleapis.com' for consumer 'project_number:1'."
+            ),
+            "status": "RESOURCE_EXHAUSTED",
+        }
+    })
 }
 
 #[test]
@@ -206,12 +227,128 @@ fn reports_a_permission_failure_with_googles_own_message() {
 }
 
 #[test]
+fn retries_a_per_minute_limit_and_carries_on() {
+    let server = MockServer::start();
+    mock_token_endpoint(&server);
+
+    // Rate limited once, then fine.
+    let limited = server.mock(|when, then| {
+        when.method("POST").path("/publish").body_includes("/a");
+        then.status(429)
+            .json_body(quota_body("Requests per minute"));
+    });
+    let ok = server.mock(|when, then| {
+        when.method("POST").path("/publish").body_includes("/b");
+        then.status(200);
+    });
+
+    let credential = Credential::File(service_account(&server.url("/token")));
+    let outcomes = engine(&server, credential)
+        .submit(&urls(&["https://example.com/a", "https://example.com/b"]))
+        .unwrap();
+
+    // Three attempts at /a: the first plus two retries, all refused.
+    assert_eq!(limited.calls(), 3);
+    // A per-minute limit that never clears still stops the run, so /b is not
+    // attempted — but the message says retrying was tried.
+    assert_eq!(ok.calls(), 0);
+    assert!(
+        outcomes[1]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("still rate limited after retrying"),
+        "{:?}",
+        outcomes[1]
+    );
+}
+
+#[test]
+fn a_per_minute_limit_that_clears_lets_the_run_finish() {
+    let server = MockServer::start();
+    mock_token_endpoint(&server);
+
+    let mut sequence = server.mock(|when, then| {
+        when.method("POST").path("/publish");
+        then.status(429)
+            .json_body(quota_body("Requests per minute"));
+    });
+    let credential = Credential::File(service_account(&server.url("/token")));
+    let google = engine(&server, credential);
+
+    // First attempt is refused; by the retry the limit has cleared.
+    sequence.delete();
+    let publish = server.mock(|when, then| {
+        when.method("POST").path("/publish");
+        then.status(200);
+    });
+
+    let outcomes = google.submit(&urls(&["https://example.com/a"])).unwrap();
+
+    assert_eq!(publish.calls(), 1);
+    assert!(outcomes[0].succeeded(), "{:?}", outcomes[0]);
+}
+
+#[test]
+fn does_not_retry_the_daily_quota() {
+    let server = MockServer::start();
+    mock_token_endpoint(&server);
+    let publish = server.mock(|when, then| {
+        when.method("POST").path("/publish");
+        then.status(429)
+            .json_body(quota_body("Publish requests per day"));
+    });
+
+    let credential = Credential::File(service_account(&server.url("/token")));
+    let outcomes = engine(&server, credential)
+        .submit(&urls(&["https://example.com/a", "https://example.com/b"]))
+        .unwrap();
+
+    // Waiting cannot help before midnight Pacific, so exactly one attempt.
+    assert_eq!(publish.calls(), 1);
+    assert!(
+        outcomes[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("resets at midnight Pacific")
+    );
+    assert!(
+        outcomes[1]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("the daily publish quota is spent")
+    );
+}
+
+#[test]
+fn honours_retry_after_when_the_server_sends_one() {
+    let server = MockServer::start();
+    mock_token_endpoint(&server);
+    let publish = server.mock(|when, then| {
+        when.method("POST").path("/publish");
+        then.status(429)
+            .header("retry-after", "0")
+            .json_body(quota_body("Requests per minute"));
+    });
+
+    let credential = Credential::File(service_account(&server.url("/token")));
+    engine(&server, credential)
+        .submit(&urls(&["https://example.com/a"]))
+        .unwrap();
+
+    assert_eq!(publish.calls(), 3);
+}
+
+#[test]
 fn stops_submitting_once_rate_limited() {
     let server = MockServer::start();
     mock_token_endpoint(&server);
     let publish = server.mock(|when, then| {
         when.method("POST").path("/publish");
-        then.status(429);
+        then.status(429)
+            .json_body(quota_body("Publish requests per day"));
     });
 
     let credential = Credential::File(service_account(&server.url("/token")));
@@ -231,7 +368,7 @@ fn stops_submitting_once_rate_limited() {
             .error
             .as_ref()
             .unwrap()
-            .contains("200 URLs per day")
+            .contains("the daily publish quota is spent")
     );
     assert!(
         outcomes[1]

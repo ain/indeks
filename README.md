@@ -145,10 +145,29 @@ the exchange is skipped and the token is used as-is.
 The service account must be an **owner** of the property in Search Console, and the
 Indexing API must be enabled for its project. A 403 says so.
 
-Each URL is one request, publishing a `URL_UPDATED` notification. **The Indexing API
-allows 200 URLs per day.** On a 429, `indeks` stops rather than spending the rest of a
-large sitemap on requests that will be refused; the URLs it did not attempt are
-reported as such.
+Each URL is one request, publishing a `URL_UPDATED` notification.
+
+### Quotas and what a 429 means
+
+Two limits apply, per Google Cloud project:
+
+| Quota | Default |
+| --- | --- |
+| Publish requests per day | 200, resetting at midnight Pacific |
+| Requests per minute, all endpoints | 380 |
+
+A 429 names which one ran out, and `indeks` reads that rather than guessing:
+
+- **Per day** — waiting cannot help before midnight Pacific, so the run stops
+  immediately. Remaining URLs are reported as not attempted.
+- **Per minute**, or a 429 naming no metric — the limit clears on its own, so the
+  request is retried with a doubling backoff (10s, 20s, 40s), honouring `Retry-After`
+  when the server sends one. Only if it still fails does the run stop.
+
+Note that the Indexing API is **restricted to pages with `JobPosting` structured data,
+or `BroadcastEvent` inside a `VideoObject`**. Other content may be accepted and then
+throttled, and quota-increase requests for it are unlikely to be granted. For an
+ordinary site, submitting a sitemap through Search Console is the supported route.
 
 `INDEKS_GOOGLE_ENDPOINT` overrides the endpoint, for testing against a local server.
 

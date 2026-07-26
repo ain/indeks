@@ -78,13 +78,22 @@ Nothing reaches the public internet. Tests either use `--dry-run`, fail during
 validation, or point `INDEKS_GOOGLE_ENDPOINT` / `INDEKS_INDEXNOW_ENDPOINT` at a mock.
 
 Tests sign with a **real RSA key**, so JWT signing is genuinely exercised rather than
-mocked — but the key is never committed. `build.rs` generates one into `OUT_DIR` along
-with a service-account file around it; tests reach it through
-`crate::GENERATED_SERVICE_ACCOUNT` (unit tests) or `concat!(env!("OUT_DIR"), …)`
-(integration tests). It is written once per `OUT_DIR` and reused.
+mocked — but the key is never committed. `tests/common/mod.rs` generates one per test
+binary, from `rsa` and `rand` as **dev**-dependencies, and writes a service-account file
+around it.
 
-That is why `Cargo.toml` sets `opt-level = 3` for build scripts in **both** profiles:
-`rsa` key generation takes close to a minute unoptimised, and under a second optimised.
+Dev-dependencies rather than a build script, and generation rather than a fixture, are
+both deliberate:
+
+- A build script would make every consumer of the published crate compile `rsa` and
+  generate a key they never use.
+- A committed key trips secret scanners and cannot be removed from history.
+- A `testkey/` path crate was tried and rejected: cargo strips a path-only
+  dev-dependency when publishing, so `tests/` would ship but no longer compile.
+
+Because the key lives in `tests/`, **no unit test can depend on one**. Anything needing
+a real key belongs in `tests/engine_google.rs`. `[profile.dev.package.rsa]` sets
+`opt-level = 3` so generation takes under a second rather than close to a minute.
 
 ## Commands
 

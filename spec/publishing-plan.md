@@ -1,6 +1,10 @@
 # Publishing to crates.io
 
-Status: planned, nothing done. Written 2026-07-26 against commit `1617fef`.
+Written 2026-07-26 against commit `1617fef`.
+
+**Status: steps 1–5 are done** (`4654d2c`). Both blockers below are fixed, the metadata
+is in, and `cargo publish --dry-run` succeeds. What remains is `cargo login`, which needs
+a token and a person, then `cargo publish` and the tag.
 
 The crate name **`indeks` is available**: `GET /api/v1/crates/indeks` returns
 `crate 'indeks' does not exist`. Nothing similar is registered.
@@ -26,39 +30,36 @@ the crate compiles `rsa` and `num-bigint-dig` as build dependencies and then spe
 generating a 2048-bit test key that nothing in the binary touches. It is the direct cost
 of moving the key out of the repository the way we did.
 
-Fix: generate the key from a **dev-dependency** instead of a build dependency.
+Fix: generate the key from a **dev-dependency** instead of a build dependency, in
+`tests/common/mod.rs`. Removes `build.rs`, `[build-dependencies] rsa, rand`, and both
+`build-override` profiles; `[profile.dev.package.rsa] opt-level = 3` keeps generation
+under a second for tests. Consumers pay nothing.
 
-This rests on a fact that was got wrong when `build.rs` was introduced:
-**dev-dependencies are available to `#[cfg(test)]` code inside the library**, not only to
-`tests/*.rs`. Sharing one generator between unit and integration tests therefore needs no
-`test-support` feature and no self-dev-dependency — a small path crate is enough:
+### The path crate that was tried and rejected
 
-```
-testkey/
-  Cargo.toml     # rsa, rand
-  src/lib.rs     # pub fn service_account() -> PathBuf
-```
+The first design put the generator in a `testkey/` path crate listed as a
+dev-dependency, so that unit tests inside the library could share it with the
+integration tests. Testing what cargo actually does with such a dependency ruled it out:
 
-```toml
-# indeks/Cargo.toml
-[dev-dependencies]
-testkey = { path = "testkey" }
-```
+- `cargo package` **succeeds** — a path-only dev-dependency is not an error.
+- The published manifest contains an **empty `[dev-dependencies]`**: cargo strips a path
+  dependency that carries no `version`.
+- The helper crate's source is **not** in the tarball.
+- Verification passes, because it builds the library and not the tests.
 
-`service_account()` generates a key on first use, caches the file under `target/`, and
-returns its path. Both `crate::GENERATED_SERVICE_ACCOUNT` and the
-`concat!(env!("OUT_DIR"), …)` constants in the integration tests are replaced by calls to
-it.
+The consequence only appears afterwards: `tests/` still ships, but `cargo test` in the
+unpacked crate fails to compile, because the dev-dependency it needs is gone. Excluding
+`tests/` would have been the other way out.
 
-What this removes:
+Putting the generator in `tests/common/mod.rs` avoids the question. `rsa` and `rand` are
+ordinary versioned dev-dependencies, so nothing is stripped and the packaged crate runs
+its own suite — checked by unpacking the tarball and running it.
 
-- `build.rs`
-- `[build-dependencies] rsa, rand`
-- `[profile.dev.build-override]` and `[profile.release.build-override]`, which exist only
-  because unoptimised RSA generation takes close to a minute
-
-Consumers then pay nothing. `[profile.dev.package.rsa] opt-level = 3` keeps generation
-fast for tests.
+The cost is that **no unit test can use a real key**, since `tests/` is invisible to
+`src/`. Four had to move. Two of them exercised the private `sign()`, so they were
+replaced by an integration test that captures the assertion the mock token endpoint
+receives and checks every claim through the public path — which is closer to what Google
+actually validates anyway.
 
 ## Metadata to add
 
@@ -183,14 +184,13 @@ is that advisories are not checked for test-only crates.
 (the Marvin attack) that can leak private key material to an attacker able to observe
 operations. There is no patched release.
 
-It is ignored, because it is not reachable here. `rsa` is a *build* dependency, used once
-in `build.rs` to generate a throwaway key for the test suite. Nothing observes the timing,
-no attacker sees the key, and the key protects nothing.
+It was ignored while `rsa` was a *build* dependency: unreachable there, since it only
+generated a throwaway key, but build-dependencies survive `exclude-dev = true` and stay
+in the graph.
 
-Note that it survives `exclude-dev = true`: build-dependencies are part of the graph even
-when dev-dependencies are not. **The ignore entry should be deleted the moment the first
-blocker above is fixed** — moving key generation to a dev-dependency takes `rsa` out of
-the graph, and the advisory with it. Two problems, one fix.
+**Resolved.** Moving key generation to `tests/common` made `rsa` a dev-dependency, so
+`exclude-dev` drops it and the advisory with it. `deny.toml` now has no ignores at all.
+Two problems, one fix.
 
 ## More decisions before the first publish
 
@@ -210,8 +210,8 @@ deleted or replaced. `0.1.0` is spent the moment it lands, and so is the crate n
 
 1. Delete or relocate `tekkie-dev-rate-limited-index-api.log`.
 2. Add the metadata above to `Cargo.toml`.
-3. Replace `build.rs` with the `testkey/` dev-dependency crate; drop both
-   `build-override` profiles; point the tests at `testkey::service_account()`.
+3. Replace `build.rs` with generation in `tests/common/mod.rs`; drop both
+   `build-override` profiles; move the four unit tests that need a real key.
 4. `cargo package --list` — read every line and confirm nothing unexpected ships.
 5. `cargo publish --dry-run` — builds the packaged crate from scratch, which catches
    anything that only works in this working tree.

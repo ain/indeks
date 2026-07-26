@@ -14,7 +14,7 @@ jobs:
     name: Test, clippy and format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust
         run: |
@@ -25,7 +25,7 @@ jobs:
       # `build.rs` generates an RSA key, and the build-script profile is
       # optimised for it, so a cold cache costs a few minutes of compiling.
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index
@@ -50,7 +50,7 @@ jobs:
     name: Build on the oldest supported Rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Cargo.toml claims `rust-version = "1.88"`, and README repeats it. This
       # job is what makes that claim true rather than aspirational.
@@ -61,7 +61,7 @@ jobs:
           rustc --version
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index

@@ -46,6 +46,39 @@ jobs:
       - name: Test
         run: cargo test
 
+  deny:
+    name: Dependency licences and advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      # `cargo install` rather than the cargo-deny action, to keep third-party
+      # actions out of the workflow. The cache makes it near-free after the first
+      # run; ~/.cargo/bin is included so the binary itself is kept.
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-deny-${{ hashFiles('Cargo.lock', 'deny.toml') }}
+          restore-keys: ${{ runner.os }}-deny-
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      # Licences, RUSTSEC advisories, wildcard versions and dependency sources.
+      # Policy and its reasoning live in deny.toml.
+      - name: Check dependencies
+        run: cargo deny check
+
   msrv:
     name: Build on the oldest supported Rust
     runs-on: ubuntu-latest

@@ -1,0 +1,74 @@
+# Dependency policy, enforced by `cargo deny check` in CI.
+#
+# The point of this file is that a copyleft or unlicensed dependency cannot
+# arrive unnoticed. `indeks` is GPL-3.0-only, which can absorb permissive code
+# but not the other way around, so every dependency must be permissive.
+
+[graph]
+# Only distributed code is subject to licence compatibility: dev-dependencies
+# are neither linked into the binary nor part of the published crate. This also
+# excludes `stringmetrics`, which reaches us through `httpmock` and declares no
+# licence at all.
+#
+# The trade-off is that advisories are not checked for test-only crates.
+exclude-dev = true
+
+[licenses]
+version = 2
+# Every licence below is permissive and GPL-3.0 compatible. Note that Apache-2.0
+# is compatible with GPL-3.0 but *not* with GPL-2.0 — if the licence of this
+# crate ever changes, this list has to be revisited rather than carried over.
+#
+# LGPL is deliberately absent. `r-efi` offers it, but as one of
+# `MIT OR Apache-2.0 OR LGPL-2.1-or-later`, so an allowed option is always
+# available. Should a crate ever appear that is LGPL-only, it should fail here
+# and be looked at rather than waved through.
+allow = [
+    "GPL-3.0-only", # indeks itself
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # webpki-root-certs, the Mozilla root CA bundle reached through reqwest's
+    # platform verifier. A permissive licence covering *data* rather than code:
+    # no copyleft, and only the disclaimer must travel with it. It is not on the
+    # FSF's reviewed list, so anyone needing strict FSF compatibility should form
+    # their own view.
+    "CDLA-Permissive-2.0",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # A timing sidechannel in `rsa` (the Marvin attack) that leaks private key
+    # material to an attacker who can observe operations. No patched release
+    # exists.
+    #
+    # Not reachable here: `rsa` is a build-dependency used once, in build.rs, to
+    # generate a throwaway RSA key for the test suite. Nothing observes the
+    # timing of that, no attacker sees the key, and the key protects nothing.
+    #
+    # This entry should be deleted along with the advisory the moment
+    # spec/publishing-plan.md's move of key generation to a dev-dependency lands:
+    # `exclude-dev = true` will then take `rsa` out of the graph entirely.
+    "RUSTSEC-2023-0071",
+]
+
+[bans]
+# Duplicate versions are worth seeing but not worth failing over: they usually
+# arrive through a transitive dependency nobody here controls.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

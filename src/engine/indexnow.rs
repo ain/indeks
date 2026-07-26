@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn rejects_a_credentials_file_without_a_key_field() {
-        let credential = Credential::File(PathBuf::from(crate::GENERATED_SERVICE_ACCOUNT));
+        let credential = Credential::File(PathBuf::from("tests/fixtures/no-key.json"));
         let error = key(&credential).unwrap_err();
         assert!(
             error.to_string().contains("no string `key` field"),

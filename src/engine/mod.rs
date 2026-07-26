@@ -113,12 +113,6 @@ mod tests {
     }
 
     #[test]
-    fn google_accepts_a_service_account_file() {
-        let credential = Credential::File(PathBuf::from(crate::GENERATED_SERVICE_ACCOUNT));
-        assert!(Kind::Google.check_credential(&credential).is_ok());
-    }
-
-    #[test]
     fn each_engine_names_itself() {
         assert_eq!(Kind::Bing.name(), indexnow::NAME);
         assert_eq!(Kind::Google.name(), google::NAME);

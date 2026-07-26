@@ -378,56 +378,13 @@ fn failure(status: StatusCode, body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
     use std::path::PathBuf;
-
-    const FIXTURE: &str = crate::GENERATED_SERVICE_ACCOUNT;
-
-    fn account() -> ServiceAccount {
-        ServiceAccount::load(&PathBuf::from(FIXTURE)).unwrap()
-    }
-
-    /// Decode a JWT segment without verifying anything.
-    fn segment(token: &str, index: usize) -> serde_json::Value {
-        let part = token.split('.').nth(index).unwrap();
-        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(part)
-            .unwrap();
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    #[test]
-    fn signs_an_rs256_assertion() {
-        let token = sign(&account(), 1_000_000).unwrap();
-        assert_eq!(token.split('.').count(), 3, "{token}");
-        assert_eq!(segment(&token, 0)["alg"], "RS256");
-    }
-
-    #[test]
-    fn the_assertion_claims_what_google_expects() {
-        let token = sign(&account(), 1_000_000).unwrap();
-        let claims = segment(&token, 1);
-
-        assert_eq!(
-            claims["iss"],
-            "indeks-test@indeks-test.iam.gserviceaccount.com"
-        );
-        assert_eq!(claims["scope"], SCOPE);
-        assert_eq!(claims["aud"], "https://oauth2.googleapis.com/token");
-        assert_eq!(claims["iat"], 1_000_000);
-        assert_eq!(claims["exp"], 1_000_000 + ASSERTION_LIFETIME);
-    }
 
     #[test]
     fn a_bare_token_needs_no_exchange() {
         let credential = Credential::Token("ya29.test-token".to_string());
         let token = access_token(&credential, &reqwest::blocking::Client::new()).unwrap();
         assert_eq!(token, "ya29.test-token");
-    }
-
-    #[test]
-    fn accepts_a_service_account_file() {
-        assert!(check_credential(&Credential::File(PathBuf::from(FIXTURE))).is_ok());
     }
 
     #[test]

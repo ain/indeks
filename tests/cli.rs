@@ -3,6 +3,8 @@
 //! Nothing here reaches the public internet: tests either pass `--dry-run`, fail
 //! during validation, or point `INDEKS_INDEXNOW_ENDPOINT` at a local mock server.
 
+mod common;
+
 use assert_cmd::Command;
 use httpmock::MockServer;
 use indeks::engine::google::ENDPOINT_ENV as GOOGLE_ENDPOINT_ENV;
@@ -11,7 +13,6 @@ use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 const KEY: &str = "abcdef0123456789abcdef0123456789";
-const CREDENTIALS_FILE: &str = concat!(env!("OUT_DIR"), "/service-account.json");
 const SITEMAP_FILE: &str = "tests/fixtures/sitemap.xml";
 
 fn indeks() -> Command {
@@ -55,6 +56,9 @@ fn dry_run_never_echoes_the_token() {
 
 #[test]
 fn accepts_repeated_urls_and_sitemaps_together() {
+    let account = common::service_account(common::GOOGLE_TOKEN_URI);
+    let credentials = account.to_str().unwrap();
+
     indeks()
         .args([
             "google",
@@ -67,7 +71,7 @@ fn accepts_repeated_urls_and_sitemaps_together() {
             "--sitemap",
             SITEMAP_FILE,
             "--credentials",
-            CREDENTIALS_FILE,
+            credentials,
             "--dry-run",
         ])
         .assert()
@@ -261,11 +265,7 @@ fn a_verbose_google_run_leaks_neither_assertion_nor_token() {
     });
 
     // A service account whose token endpoint is the mock server.
-    let mut account: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(CREDENTIALS_FILE).unwrap()).unwrap();
-    account["token_uri"] = serde_json::json!(server.url("/token"));
-    let path = std::env::temp_dir().join("indeks-cli-service-account.json");
-    std::fs::write(&path, serde_json::to_string(&account).unwrap()).unwrap();
+    let path = common::service_account(&server.url("/token"));
 
     let assert = indeks()
         .env(GOOGLE_ENDPOINT_ENV, server.url("/publish"))

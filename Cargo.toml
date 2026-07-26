@@ -5,6 +5,13 @@ edition = "2024"
 rust-version = "1.88"
 description = "CLI to push URLs and sitemaps to search engines for indexing"
 license = "GPL-3.0-only"
+repository = "https://github.com/ain/indeks"
+readme = "README.md"
+keywords = ["seo", "sitemap", "indexing", "indexnow", "cli"]
+categories = ["command-line-utilities", "web-programming"]
+# Kept out of the published crate: working notes, CI, and the log that prompted
+# the rate-limit work. `tests/` stays in, so the crate can be verified as shipped.
+exclude = ["spec/", ".github/", "CLAUDE.md", "*.log"]
 
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
@@ -18,19 +25,19 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
 
-# `build.rs` generates an RSA key, which is unusably slow unoptimised.
-[profile.dev.build-override]
-opt-level = 3
-
-[profile.release.build-override]
-opt-level = 3
-
 [dev-dependencies]
 assert_cmd = "2.2.2"
 base64 = "0.23.0"
 httpmock = "0.8.2"
 predicates = "3.1.4"
-
-[build-dependencies]
+# Used only by tests/common, to generate the RSA key the Google tests sign with.
 rand = "0.8"
 rsa = "0.9"
+
+# RSA key generation is unusably slow unoptimised — close to a minute — so these
+# two are optimised even in debug builds. Only the test suite pays for them.
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package.num-bigint-dig]
+opt-level = 3

@@ -48,20 +48,10 @@ allow = [
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-    # A timing sidechannel in `rsa` (the Marvin attack) that leaks private key
-    # material to an attacker who can observe operations. No patched release
-    # exists.
-    #
-    # Not reachable here: `rsa` is a build-dependency used once, in build.rs, to
-    # generate a throwaway RSA key for the test suite. Nothing observes the
-    # timing of that, no attacker sees the key, and the key protects nothing.
-    #
-    # This entry should be deleted along with the advisory the moment
-    # spec/publishing-plan.md's move of key generation to a dev-dependency lands:
-    # `exclude-dev = true` will then take `rsa` out of the graph entirely.
-    "RUSTSEC-2023-0071",
-]
+# No ignores. RUSTSEC-2023-0071 against `rsa` used to be listed here, when key
+# generation lived in build.rs and build-dependencies kept it in the graph.
+# Generation moved to tests/common, so `rsa` is a dev-dependency and
+# `exclude-dev` drops it.
 
 [bans]
 # Duplicate versions are worth seeing but not worth failing over: they usually

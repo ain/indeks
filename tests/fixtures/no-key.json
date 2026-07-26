@@ -1,0 +1,4 @@
+{
+  "project_id": "indeks-test",
+  "comment": "Valid JSON with no `key` field, for the IndexNow credential checks."
+}

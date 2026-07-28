@@ -49,6 +49,9 @@ jobs:
   deny:
     name: Dependency licences and advisories
     runs-on: ubuntu-latest
+    env:
+      # Pinned so the cache key means something and upgrades are a visible edit.
+      CARGO_DENY_VERSION: "0.20.2"
     steps:
       - uses: actions/checkout@v5
 
@@ -58,21 +61,27 @@ jobs:
           rustup default stable
 
       # `cargo install` rather than the cargo-deny action, to keep third-party
-      # actions out of the workflow. The cache makes it near-free after the first
-      # run; ~/.cargo/bin is included so the binary itself is kept.
-      - name: Cache cargo
+      # actions out of the workflow. Only the binary is cached: caching the whole
+      # of ~/.cargo alongside it buys little here and takes far longer to restore.
+      #
+      # No restore-keys: a cache from a different version would be worse than a
+      # miss, since the install step below skips an existing binary.
+      - name: Cache cargo-deny
         uses: actions/cache@v5
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-deny-${{ hashFiles('Cargo.lock', 'deny.toml') }}
-          restore-keys: ${{ runner.os }}-deny-
+          path: ~/.cargo/bin/cargo-deny
+          key: ${{ runner.os }}-cargo-deny-${{ env.CARGO_DENY_VERSION }}
 
+      # `cargo install` fails with "binary `cargo-deny` already exists in
+      # destination" when the cache has already restored it, so only install on a
+      # cache miss. The exact-match key guarantees a restored binary is the
+      # pinned version.
       - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
+        run: |
+          if ! command -v cargo-deny >/dev/null; then
+            cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
+          fi
+          cargo deny --version
 
       # Licences, RUSTSEC advisories, wildcard versions and dependency sources.
       # Policy and its reasoning live in deny.toml.

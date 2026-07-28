@@ -247,7 +247,21 @@ cargo fmt
 ```
 
 CI runs those three on every push and pull request, plus a `cargo check` on Rust 1.88
-to keep the minimum-version claim honest. Nothing in the suite reaches the internet.
+to keep the minimum-version claim honest, and `cargo deny check` for dependency licences
+and advisories. Nothing in the suite reaches the internet.
+
+### Releasing
+
+Pushing a `v*` tag publishes to crates.io, using the `CARGO_REGISTRY_TOKEN` repository
+secret. The workflow refuses to publish if the tag and the version in `Cargo.toml`
+disagree, and runs the full suite against the tagged commit first — CI itself does not
+trigger on tags.
+
+```
+cargo publish --dry-run --locked   # optional, the workflow does this too
+git tag -a v0.1.0 -m "0.1.0"
+git push origin v0.1.0
+```
 
 The requirements are in `spec/initial-functionality.md` and the plan being worked
 through, including the milestone numbering referenced by the `todo!`s in the source, is

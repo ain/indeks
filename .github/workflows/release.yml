@@ -1,0 +1,63 @@
+name: Release
+
+# Publishing is irreversible: a version can be yanked but never replaced. So the
+# trigger is a tag push and nothing else — no branch pushes, no schedule.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+# Never let two publishes of the same tag race each other.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc --version
+
+      # A tag saying v0.2.0 while Cargo.toml still says 0.1.0 would publish the
+      # wrong version under the right name, and neither can be taken back. Fail
+      # before anything else runs.
+      - name: Check the tag matches Cargo.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
+            exit 1
+          fi
+          echo "publishing ${version}"
+
+      # The CI workflow triggers on pushes to main and on pull requests, so a tag
+      # push does not run it. These checks are what verify the exact commit being
+      # published, rather than trusting that main was green when it was tagged.
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      # --locked so the published crate is built against the dependency versions
+      # in Cargo.lock, not whatever has been released since.
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
